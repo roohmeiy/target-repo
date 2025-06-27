@@ -1,5 +1,4 @@
 name: Sync Repositories
-
 on:
   push:
     branches: [ main ]
@@ -13,28 +12,73 @@ jobs:
       with:
         fetch-depth: 0
         token: ${{ secrets.TOKEN }}
-
-    - run: |
+    
+    - name: Configure Git
+      run: |
         git config --global user.name "GitHub Actions Bot"
         git config --global user.email "actions@github.com"
-
-    - run: |
-        rm -rf .github/workflows/
-        git add -A
-        git commit -m "Remove workflows for sync" || true
-
-    - run: git remote add target https://${{ secrets.TOKEN }}@github.com/roohmeiy/target-repo.git
-
-    - run: git fetch target
-
-    - run: |
+    
+    - name: Add target remote and fetch
+      run: |
+        git remote add target https://${{ secrets.TOKEN }}@github.com/roohmeiy/target-repo.git
+        git fetch target
+    
+    - name: Backup target workflows temporarily
+      run: |
+        # Create temp branch from target to access its workflows
+        git checkout -b temp-target target/main 2>/dev/null || git checkout -b temp-target target/master
+        
+        # Backup target's existing workflows
+        if [ -d ".github/workflows" ]; then
+          mkdir -p /tmp/target-workflows
+          cp -r .github/workflows/* /tmp/target-workflows/ 2>/dev/null || true
+          echo "Backed up target workflows"
+        fi
+        
+        # Return to source main
         git checkout main
+    
+    - name: Prepare source for sync (keep source workflows)
+      run: |
+        # Don't remove source workflows - we want them to be synced to target
+        # Target should run source workflows, not its own
+        git add -A
+        git commit -m "Prepare source for sync" || true
+    
+    - name: Push source to target (with source workflows)
+      run: |
+        # Push source (including source workflows) to target
         git push target main:main --force-with-lease
-
-    - run: |
+    
+    - name: Disable target's original workflows
+      run: |
+        # Switch to target's main branch
+        git checkout -b target-main target/main
+        
+        # If target had workflows, rename them to disable them
+        if [ -d "/tmp/target-workflows" ] && [ "$(ls -A /tmp/target-workflows)" ]; then
+          mkdir -p .github/workflows-disabled
+          cp -r /tmp/target-workflows/* .github/workflows-disabled/ 2>/dev/null || true
+          
+          # Add a README to explain
+          echo "# Disabled Workflows" > .github/workflows-disabled/README.md
+          echo "These workflows were disabled during sync to prevent conflicts." >> .github/workflows-disabled/README.md
+          echo "Only source repository workflows should trigger." >> .github/workflows-disabled/README.md
+          
+          git add .github/workflows-disabled/
+          git commit -m "Disable original target workflows" || true
+          git push target target-main:main
+        fi
+        
+        # Return to source main
+        git checkout main
+    
+    - name: Push develop branch if exists
+      run: |
         if git show-ref --verify --quiet refs/heads/develop; then
           git checkout develop
           git push target develop:develop --force-with-lease
         fi
-
-    - run: git push target --tags
+    
+    - name: Push tags
+      run: git push target --tags
