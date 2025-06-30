@@ -1,0 +1,14 @@
+name: Handle Source Trigger
+
+on:
+  repository_dispatch:
+    types: [source-updated]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Testing trigger
+      run: echo "Hello world!! "
